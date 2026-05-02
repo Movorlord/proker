@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MODE DIEU - Simulateur Cosmique ULTIME+</title>
+<style>
+body{margin:0;overflow:hidden;background:black;font-family:sans-serif}
+#ui{position:absolute;top:10px;left:10px;background:rgba(0,0,0,0.7);padding:12px;border-radius:10px;color:white}
+#panel{position:absolute;right:10px;top:10px;width:260px;background:rgba(0,0,0,0.7);padding:10px;border-radius:10px;color:white}
+button{margin:3px;padding:6px;border:none;border-radius:6px;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="ui">
+<button onclick="generateSystem()">🎲 Générer</button>
+<button onclick="spawnMeteor()">☄️ Météore</button>
+<button onclick="togglePause()">⏸</button>
+<button onclick="timeScale*=2">⏩</button>
+<button onclick="timeScale/=2">⏪</button>
+<button onclick="takeScreenshot()">📸</button>
+<button onclick="exportData()">📋</button>
+</div>
+<div id="panel">Clique une planète</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+let scene,camera,renderer,controls;
+let bodies=[];
+let paused=false,timeScale=1;
+const G=0.05;
+let raycaster=new THREE.Raycaster();
+let mouse=new THREE.Vector2();
+let selected=null;
+
+init();animate();
+
+function init(){
+scene=new THREE.Scene();
+camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,10000);
+camera.position.set(0,200,400);
+renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+document.body.appendChild(renderer.domElement);
+controls=new THREE.OrbitControls(camera,renderer.domElement);
+
+const light=new THREE.PointLight(0xffffff,2,5000);
+scene.add(light);
+
+const star=createBody(0,0,0,3000,20,0xffdd88,true);
+bodies.push(star);
+
+createStars();
+generateSystem();
+
+window.addEventListener('pointerdown',onClick);
+window.addEventListener('pointermove',onDrag);
+}
+
+function createStars(){
+const geo=new THREE.BufferGeometry();
+let v=[];
+for(let i=0;i<20000;i++){
+v.push(THREE.MathUtils.randFloatSpread(8000),THREE.MathUtils.randFloatSpread(8000),THREE.MathUtils.randFloatSpread(8000));}
+geo.setAttribute('position',new THREE.Float32BufferAttribute(v,3));
+scene.add(new THREE.Points(geo,new THREE.PointsMaterial({color:0xffffff})));
+}
+
+function createBody(x,y,z,mass,size,color,isStar=false){
+const mesh=new THREE.Mesh(
+new THREE.SphereGeometry(size,32,32),
+new THREE.MeshStandardMaterial({color,emissive:isStar?color:0x000000})
+);
+mesh.position.set(x,y,z);
+scene.add(mesh);
+
+// glow atmosphère
+const glow=new THREE.Mesh(
+new THREE.SphereGeometry(size*1.2,32,32),
+new THREE.MeshBasicMaterial({color:0x66ccff,transparent:true,opacity:0.15})
+);
+mesh.add(glow);
+
+// nuages
+const clouds=new THREE.Mesh(
+new THREE.SphereGeometry(size*1.05,32,32),
+new THREE.MeshStandardMaterial({color:0xffffff,transparent:true,opacity:0.2})
+);
+mesh.add(clouds);
+
+return{mesh,mass,velocity:new THREE.Vector3(),size,alive:false,temp:0,glow,clouds};
+}
+
+function generateSystem(){
+bodies.slice(1).forEach(b=>scene.remove(b.mesh));
+bodies=bodies.slice(0,1);
+
+for(let i=0;i<6;i++){
+const dist=100+i*80;
+const angle=Math.random()*Math.PI*2;
+const x=Math.cos(angle)*dist;
+const z=Math.sin(angle)*dist;
+const size=Math.random()*6+3;
+const mass=size*80;
+const temp=500/Math.sqrt(dist/100);
+const color=getColor(temp);
+
+const p=createBody(x,0,z,mass,size,color);
+p.temp=temp;
+const speed=Math.sqrt(G*bodies[0].mass/dist);
+p.velocity.set(-Math.sin(angle)*speed,0,Math.cos(angle)*speed);
+if(temp>0&&temp<80)p.alive=true;
+bodies.push(p);
+}
+}
+
+function getColor(t){if(t>300)return 0xff2200;if(t>150)return 0x999999;if(t>0)return 0x3399ff;return 0xaaddff;}
+
+function spawnMeteor(){
+const m=createBody(THREE.MathUtils.randFloatSpread(800),0,THREE.MathUtils.randFloatSpread(800),20,2,0xffffff);
+m.velocity.set(THREE.MathUtils.randFloatSpread(8),0,THREE.MathUtils.randFloatSpread(8));
+bodies.push(m);
+}
+
+function applyGravity(){
+for(let i=0;i<bodies.length;i++){
+for(let j=i+1;j<bodies.length;j++){
+const a=bodies[i],b=bodies[j];
+const dir=new THREE.Vector3().subVectors(b.mesh.position,a.mesh.position);
+const dist=dir.length();
+if(dist < a.size+b.size){if(a.mass>b.mass){a.mass+=b.mass;scene.remove(b.mesh);bodies.splice(j,1);j--;}continue;}
+const force=G*a.mass*b.mass/(dist*dist);
+dir.normalize();
+a.velocity.add(dir.clone().multiplyScalar(force/a.mass*timeScale));
+b.velocity.add(dir.clone().multiplyScalar(-force/b.mass*timeScale));
+}}
+}
+
+function updateBodies(){
+bodies.forEach(b=>{
+b.mesh.position.add(b.velocity.clone().multiplyScalar(timeScale));
+b.clouds.rotation.y+=0.001;});
+}
+
+function animate(){
+requestAnimationFrame(animate);
+if(!paused){applyGravity();updateBodies();}
+controls.update();
+renderer.render(scene,camera);
+}
+
+function togglePause(){paused=!paused;}
+
+function takeScreenshot(){const a=document.createElement('a');a.href=renderer.domElement.toDataURL();a.download='cosmos.png';a.click();}
+
+function exportData(){
+const data=bodies.map((b,i)=>({id:i,temp:b.temp,life:b.alive}));
+navigator.clipboard.writeText(JSON.stringify(data,null,2));alert('copié');}
+
+// drag + sélection
+function onClick(e){
+mouse.x=(e.clientX/innerWidth)*2-1;
+mouse.y=-(e.clientY/innerHeight)*2+1;
+raycaster.setFromCamera(mouse,camera);
+const intersects=raycaster.intersectObjects(bodies.map(b=>b.mesh));
+if(intersects.length>0){selected=bodies.find(b=>b.mesh===intersects[0].object);
+showLore(selected);} }
+
+function onDrag(e){
+if(!selected)return;
+mouse.x=(e.clientX/innerWidth)*2-1;
+mouse.y=-(e.clientY/innerHeight)*2+1;
+raycaster.setFromCamera(mouse,camera);
+const plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
+const pos=new THREE.Vector3();
+raycaster.ray.intersectPlane(plane,pos);
+selected.mesh.position.copy(pos);
+}
+
+// lore automatique
+function showLore(p){
+const txt=`Planète\nTemp: ${Math.round(p.temp)}°C\nVie: ${p.alive?"Oui":"Non"}\nType: ${p.temp>150?"Volcanique":p.temp>0?"Océanique":"Glacée"}`;
+document.getElementById('panel').innerText=txt;
+}
+
+window.addEventListener('resize',()=>{
+camera.aspect=innerWidth/innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
