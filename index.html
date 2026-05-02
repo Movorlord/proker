@@ -3,37 +3,31 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MODE DIEU - Simulateur Cosmique ULTIME+</title>
+<title>MODE DIEU - COSMOS PRO V3</title>
 <style>
-body{margin:0;overflow:hidden;background:black;font-family:sans-serif}
-#ui{position:absolute;top:10px;left:10px;background:rgba(0,0,0,0.7);padding:12px;border-radius:10px;color:white}
-#panel{position:absolute;right:10px;top:10px;width:260px;background:rgba(0,0,0,0.7);padding:10px;border-radius:10px;color:white}
-button{margin:3px;padding:6px;border:none;border-radius:6px;cursor:pointer}
+body{margin:0;overflow:hidden;background:#000;font-family:sans-serif}
+#ui{position:absolute;top:10px;left:10px;width:260px;background:rgba(0,0,0,0.8);padding:12px;border-radius:12px;color:white}
+button,input{width:100%;margin:4px 0;padding:6px;border:none;border-radius:6px}
 </style>
 </head>
 <body>
 <div id="ui">
-<button onclick="generateSystem()">🎲 Générer</button>
+<button onclick="generateSystem()">🎲 Nouveau système</button>
 <button onclick="spawnMeteor()">☄️ Météore</button>
 <button onclick="togglePause()">⏸</button>
-<button onclick="timeScale*=2">⏩</button>
-<button onclick="timeScale/=2">⏪</button>
-<button onclick="takeScreenshot()">📸</button>
-<button onclick="exportData()">📋</button>
+<button onclick="toggleDrag()">🖱 Déplacer</button>
+<input type="range" min="0.1" max="5" step="0.1" value="1" onchange="timeScale=this.value">
 </div>
-<div id="panel">Clique une planète</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/OrbitControls.js"></script>
 
 <script>
 let scene,camera,renderer,controls;
-let bodies=[];
-let paused=false,timeScale=1;
-const G=0.05;
-let raycaster=new THREE.Raycaster();
-let mouse=new THREE.Vector2();
-let selected=null;
+let bodies=[]; let meteors=[]; let particles=[];
+let paused=false,timeScale=1,G=0.05;
+let dragMode=false,selected=null;
+let raycaster=new THREE.Raycaster(),mouse=new THREE.Vector2();
 
 init();animate();
 
@@ -45,83 +39,89 @@ renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(innerWidth,innerHeight);
 document.body.appendChild(renderer.domElement);
 controls=new THREE.OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true;
 
 const light=new THREE.PointLight(0xffffff,2,5000);
 scene.add(light);
 
-const star=createBody(0,0,0,3000,20,0xffdd88,true);
+const star=createPlanet(0,0,0,3000,30,0xffdd88,true);
 bodies.push(star);
 
-createStars();
-generateSystem();
+createStars(); generateSystem();
 
 window.addEventListener('pointerdown',onClick);
 window.addEventListener('pointermove',onDrag);
 }
 
 function createStars(){
-const geo=new THREE.BufferGeometry();
-let v=[];
-for(let i=0;i<20000;i++){
-v.push(THREE.MathUtils.randFloatSpread(8000),THREE.MathUtils.randFloatSpread(8000),THREE.MathUtils.randFloatSpread(8000));}
+const geo=new THREE.BufferGeometry(); let v=[];
+for(let i=0;i<60000;i++){v.push(Math.random()*10000-5000,Math.random()*10000-5000,Math.random()*10000-5000)}
 geo.setAttribute('position',new THREE.Float32BufferAttribute(v,3));
-scene.add(new THREE.Points(geo,new THREE.PointsMaterial({color:0xffffff})));
+scene.add(new THREE.Points(geo,new THREE.PointsMaterial({size:1})));
 }
 
-function createBody(x,y,z,mass,size,color,isStar=false){
-const mesh=new THREE.Mesh(
-new THREE.SphereGeometry(size,32,32),
-new THREE.MeshStandardMaterial({color,emissive:isStar?color:0x000000})
-);
+function createPlanet(x,y,z,mass,size,color,isStar=false){
+const mesh=new THREE.Mesh(new THREE.SphereGeometry(size,64,64),
+new THREE.MeshStandardMaterial({color,emissive:isStar?color:0x000000}));
 mesh.position.set(x,y,z);
 scene.add(mesh);
 
-// glow atmosphère
-const glow=new THREE.Mesh(
-new THREE.SphereGeometry(size*1.2,32,32),
-new THREE.MeshBasicMaterial({color:0x66ccff,transparent:true,opacity:0.15})
-);
+// continents texture simple
+mesh.material.map=createTexture(color);
+
+// glow
+const glow=new THREE.Mesh(new THREE.SphereGeometry(size*1.3,32,32),
+new THREE.MeshBasicMaterial({color:0x66ccff,transparent:true,opacity:0.1}));
 mesh.add(glow);
 
-// nuages
-const clouds=new THREE.Mesh(
-new THREE.SphereGeometry(size*1.05,32,32),
-new THREE.MeshStandardMaterial({color:0xffffff,transparent:true,opacity:0.2})
-);
-mesh.add(clouds);
+// villes
+const city=new THREE.Mesh(new THREE.SphereGeometry(size*1.01,32,32),
+new THREE.MeshBasicMaterial({color:0xffff88,transparent:true,opacity:0.2}));
+mesh.add(city);
 
-return{mesh,mass,velocity:new THREE.Vector3(),size,alive:false,temp:0,glow,clouds};
+// satellite
+const sat=new THREE.Mesh(new THREE.SphereGeometry(1,8,8),
+new THREE.MeshBasicMaterial({color:0xffffff}));
+mesh.add(sat);
+
+return{mesh,mass,velocity:new THREE.Vector3(),size,city,sat};
+}
+
+function createTexture(color){
+const size=64; const data=new Uint8Array(size*size*3);
+for(let i=0;i<data.length;i+=3){
+const val=Math.random()*255;
+data[i]=val; data[i+1]=val; data[i+2]=val;
+}
+const texture=new THREE.DataTexture(data,size,size,THREE.RGBFormat);
+texture.needsUpdate=true;
+return texture;
 }
 
 function generateSystem(){
 bodies.slice(1).forEach(b=>scene.remove(b.mesh));
 bodies=bodies.slice(0,1);
-
 for(let i=0;i<6;i++){
-const dist=100+i*80;
+const dist=120+i*90;
 const angle=Math.random()*Math.PI*2;
 const x=Math.cos(angle)*dist;
 const z=Math.sin(angle)*dist;
-const size=Math.random()*6+3;
-const mass=size*80;
-const temp=500/Math.sqrt(dist/100);
-const color=getColor(temp);
+const size=Math.random()*8+4;
+const mass=size*100;
+const color=new THREE.Color().setHSL(Math.random(),0.7,0.5);
 
-const p=createBody(x,0,z,mass,size,color);
-p.temp=temp;
+const p=createPlanet(x,0,z,mass,size,color);
 const speed=Math.sqrt(G*bodies[0].mass/dist);
 p.velocity.set(-Math.sin(angle)*speed,0,Math.cos(angle)*speed);
-if(temp>0&&temp<80)p.alive=true;
+
 bodies.push(p);
 }
 }
 
-function getColor(t){if(t>300)return 0xff2200;if(t>150)return 0x999999;if(t>0)return 0x3399ff;return 0xaaddff;}
-
 function spawnMeteor(){
-const m=createBody(THREE.MathUtils.randFloatSpread(800),0,THREE.MathUtils.randFloatSpread(800),20,2,0xffffff);
-m.velocity.set(THREE.MathUtils.randFloatSpread(8),0,THREE.MathUtils.randFloatSpread(8));
-bodies.push(m);
+const m=createPlanet(Math.random()*1000-500,0,Math.random()*1000-500,20,2,0xffffff);
+m.velocity.set(Math.random()*6-3,0,Math.random()*6-3);
+meteors.push(m); bodies.push(m);
 }
 
 function applyGravity(){
@@ -130,7 +130,10 @@ for(let j=i+1;j<bodies.length;j++){
 const a=bodies[i],b=bodies[j];
 const dir=new THREE.Vector3().subVectors(b.mesh.position,a.mesh.position);
 const dist=dir.length();
-if(dist < a.size+b.size){if(a.mass>b.mass){a.mass+=b.mass;scene.remove(b.mesh);bodies.splice(j,1);j--;}continue;}
+
+if(dist < a.size+b.size){explode(b.mesh.position);
+a.mass+=b.mass;scene.remove(b.mesh);bodies.splice(j,1);j--;continue;}
+
 const force=G*a.mass*b.mass/(dist*dist);
 dir.normalize();
 a.velocity.add(dir.clone().multiplyScalar(force/a.mass*timeScale));
@@ -138,38 +141,51 @@ b.velocity.add(dir.clone().multiplyScalar(-force/b.mass*timeScale));
 }}
 }
 
+function explode(pos){
+for(let i=0;i<30;i++){
+const p=new THREE.Mesh(new THREE.SphereGeometry(0.5,6,6),
+new THREE.MeshBasicMaterial({color:0xffaa00}));
+p.position.copy(pos);
+scene.add(p);
+particles.push({mesh:p,vel:new THREE.Vector3(Math.random()*4-2,Math.random()*4-2,Math.random()*4-2)});
+}
+}
+
+function updateParticles(){
+particles.forEach((p,i)=>{
+p.mesh.position.add(p.vel);
+p.mesh.scale.multiplyScalar(0.97);
+if(p.mesh.scale.x<0.1){scene.remove(p.mesh);particles.splice(i,1);}
+});
+}
+
 function updateBodies(){
 bodies.forEach(b=>{
 b.mesh.position.add(b.velocity.clone().multiplyScalar(timeScale));
-b.clouds.rotation.y+=0.001;});
+b.mesh.rotation.y+=0.002;
+b.city.visible=b.mass>500;
+b.sat.position.set(Math.sin(Date.now()*0.001)*b.size*2,0,Math.cos(Date.now()*0.001)*b.size*2);
+});
 }
 
 function animate(){
 requestAnimationFrame(animate);
-if(!paused){applyGravity();updateBodies();}
-controls.update();
-renderer.render(scene,camera);
+if(!paused){applyGravity();updateBodies();updateParticles();}
+controls.update(); renderer.render(scene,camera);
 }
 
-function togglePause(){paused=!paused;}
+function togglePause(){paused=!paused}
+function toggleDrag(){dragMode=!dragMode}
 
-function takeScreenshot(){const a=document.createElement('a');a.href=renderer.domElement.toDataURL();a.download='cosmos.png';a.click();}
-
-function exportData(){
-const data=bodies.map((b,i)=>({id:i,temp:b.temp,life:b.alive}));
-navigator.clipboard.writeText(JSON.stringify(data,null,2));alert('copié');}
-
-// drag + sélection
-function onClick(e){
+function onClick(e){if(!dragMode)return;
 mouse.x=(e.clientX/innerWidth)*2-1;
 mouse.y=-(e.clientY/innerHeight)*2+1;
 raycaster.setFromCamera(mouse,camera);
-const intersects=raycaster.intersectObjects(bodies.map(b=>b.mesh));
-if(intersects.length>0){selected=bodies.find(b=>b.mesh===intersects[0].object);
-showLore(selected);} }
+const hit=raycaster.intersectObjects(bodies.map(b=>b.mesh));
+if(hit.length>0)selected=bodies.find(b=>b.mesh===hit[0].object);
+}
 
-function onDrag(e){
-if(!selected)return;
+function onDrag(e){if(!selected||!dragMode)return;
 mouse.x=(e.clientX/innerWidth)*2-1;
 mouse.y=-(e.clientY/innerHeight)*2+1;
 raycaster.setFromCamera(mouse,camera);
@@ -177,12 +193,6 @@ const plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
 const pos=new THREE.Vector3();
 raycaster.ray.intersectPlane(plane,pos);
 selected.mesh.position.copy(pos);
-}
-
-// lore automatique
-function showLore(p){
-const txt=`Planète\nTemp: ${Math.round(p.temp)}°C\nVie: ${p.alive?"Oui":"Non"}\nType: ${p.temp>150?"Volcanique":p.temp>0?"Océanique":"Glacée"}`;
-document.getElementById('panel').innerText=txt;
 }
 
 window.addEventListener('resize',()=>{
